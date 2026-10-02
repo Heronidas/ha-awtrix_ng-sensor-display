@@ -38,6 +38,17 @@ blueprint:
           selector:
             condition: {}
 
+        condition_trigger_entities:
+          name: "Entitäten der Zusatzbedingung (Optional)"
+          description: >-
+            Normalerweise dieselben Entitäten wie oben bei "Zusätzliche
+            Bedingung". Ohne Angabe reagiert die App erst beim nächsten
+            Sensor-Update auf eine geänderte Bedingung, nicht sofort.
+          default: []
+          selector:
+            entity:
+              multiple: true
+
     geraet:
       name: AWTRIX-Panel
       icon: mdi:led-strip-variant
@@ -446,6 +457,7 @@ variables:
   threshold_high: !input threshold_high
   color_high: !input color_high
   app_name: !input app_name
+  sensor_entity: !input sensor_entity
   awtrix_device: !input awtrix_device
   apply_device_settings: !input apply_device_settings
   transition_effect: !input transition_effect
@@ -459,6 +471,8 @@ variables:
 triggers:
   - trigger: state
     entity_id: !input sensor_entity
+  - trigger: state
+    entity_id: !input condition_trigger_entities
 
 conditions:
   - condition: not
@@ -476,7 +490,7 @@ actions:
               topic: "{{ mqtt_topic }}/cmd/apps/pushed/{{ app_name }}"
               payload: >-
                 {% set payload = {
-                  'text': trigger.to_state.state ~ unit,
+                  'text': states(sensor_entity) ~ unit,
                   'textCenter': center,
                   'textCase': text_case,
                   'scroll': {
@@ -497,7 +511,7 @@ actions:
                 {% if icon_id %}
                   {% set payload = dict(payload, icon=icon_id) %}
                 {% endif %}
-                {% set value = trigger.to_state.state | float(0) %}
+                {% set value = states(sensor_entity) | float(0) %}
                 {% if use_thresholds and value <= (threshold_low | float(0)) %}
                   {% set active_color = color_low %}
                 {% elif use_thresholds and value >= (threshold_high | float(100)) %}
