@@ -32,11 +32,22 @@ blueprint:
           name: "Zusätzliche Bedingung (Optional)"
           description: >-
             Nur wenn diese Bedingung(en) erfüllt sind, wird das Panel aktualisiert.
-            Ist sie nicht erfüllt, bleibt die zuletzt gesendete Anzeige bis zum
-            Ablauf der Ablaufzeit stehen. Leer lassen für keine Einschränkung.
+            Ist sie nicht erfüllt, wird die App stattdessen vom Panel entfernt.
+            Leer lassen für keine Einschränkung.
           default: []
           selector:
             condition: {}
+
+        condition_trigger_entities:
+          name: "Entitäten der Zusatzbedingung (Optional)"
+          description: >-
+            Normalerweise dieselben Entitäten wie oben bei "Zusätzliche
+            Bedingung". Ohne Angabe reagiert die App erst beim nächsten
+            Sensor-Update auf eine geänderte Bedingung, nicht sofort.
+          default: []
+          selector:
+            entity:
+              multiple: true
 
     geraet:
       name: AWTRIX-Panel
@@ -446,6 +457,7 @@ variables:
   threshold_high: !input threshold_high
   color_high: !input color_high
   app_name: !input app_name
+  sensor_entity: !input sensor_entity
   awtrix_device: !input awtrix_device
   apply_device_settings: !input apply_device_settings
   transition_effect: !input transition_effect
@@ -459,6 +471,8 @@ variables:
 triggers:
   - trigger: state
     entity_id: !input sensor_entity
+  - trigger: state
+    entity_id: !input condition_trigger_entities
 
 conditions:
   - condition: not
@@ -466,59 +480,65 @@ conditions:
       - condition: state
         entity_id: !input sensor_entity
         state: ["unknown", "unavailable", "none"]
-  - condition: and
-    conditions: !input optional_condition
 
 actions:
-  - action: mqtt.publish
-    data:
-      topic: "{{ mqtt_topic }}/cmd/apps/pushed/{{ app_name }}"
-      payload: >-
-        {% set payload = {
-          'text': trigger.to_state.state ~ unit,
-          'textCenter': center,
-          'textCase': text_case,
-          'scroll': {
-            'mode': scroll_mode,
-            'speed': scroll_speed | int(100),
-            'direction': scroll_direction,
-            'entry': scroll_entry,
-            'whenFits': scroll_when_fits,
-            'gap': scroll_gap | int(8),
-            'holdMs': scroll_hold_ms | int(1000)
-          },
-          'effect': effect_id,
-          'effectSpeed': effect_speed | float(1.0),
-          'overlay': overlay,
-          'lifetimeMs': (lifetime_min | int(0)) * 60000,
-          'lifetimeExpiry': 'remove'
-        } %}
-        {% if icon_id %}
-          {% set payload = dict(payload, icon=icon_id) %}
-        {% endif %}
-        {% set value = trigger.to_state.state | float(0) %}
-        {% if use_thresholds and value <= (threshold_low | float(0)) %}
-          {% set active_color = color_low %}
-        {% elif use_thresholds and value >= (threshold_high | float(100)) %}
-          {% set active_color = color_high %}
-        {% else %}
-          {% set active_color = text_color %}
-        {% endif %}
-        {% if rainbow %}
-          {% set payload = dict(payload, palette='Rainbow', textColor='palette') %}
-        {% else %}
-          {% set payload = dict(payload, textColor=[active_color[0] | int, active_color[1] | int, active_color[2] | int]) %}
-        {% endif %}
-        {% if duration_sec | int(0) > 0 %}
-          {% set payload = dict(payload, durationMs=(duration_sec | int(0)) * 1000) %}
-        {% endif %}
-        {% if show_progress %}
-          {% set span = (progress_max | float(100)) - (progress_min | float(0)) %}
-          {% set raw_pct = ((value - (progress_min | float(0))) / span * 100) | round(0) | int if span != 0 else 0 %}
-          {% set pct = 0 if raw_pct < 0 else (100 if raw_pct > 100 else raw_pct) %}
-          {% set payload = dict(payload, progress=pct, progressColor=[active_color[0] | int, active_color[1] | int, active_color[2] | int]) %}
-        {% endif %}
-        {{ payload | tojson }}
+  - choose:
+      - conditions: !input optional_condition
+        sequence:
+          - action: mqtt.publish
+            data:
+              topic: "{{ mqtt_topic }}/cmd/apps/pushed/{{ app_name }}"
+              payload: >-
+                {% set payload = {
+                  'text': states(sensor_entity) ~ unit,
+                  'textCenter': center,
+                  'textCase': text_case,
+                  'scroll': {
+                    'mode': scroll_mode,
+                    'speed': scroll_speed | int(100),
+                    'direction': scroll_direction,
+                    'entry': scroll_entry,
+                    'whenFits': scroll_when_fits,
+                    'gap': scroll_gap | int(8),
+                    'holdMs': scroll_hold_ms | int(1000)
+                  },
+                  'effect': effect_id,
+                  'effectSpeed': effect_speed | float(1.0),
+                  'overlay': overlay,
+                  'lifetimeMs': (lifetime_min | int(0)) * 60000,
+                  'lifetimeExpiry': 'remove'
+                } %}
+                {% if icon_id %}
+                  {% set payload = dict(payload, icon=icon_id) %}
+                {% endif %}
+                {% set value = states(sensor_entity) | float(0) %}
+                {% if use_thresholds and value <= (threshold_low | float(0)) %}
+                  {% set active_color = color_low %}
+                {% elif use_thresholds and value >= (threshold_high | float(100)) %}
+                  {% set active_color = color_high %}
+                {% else %}
+                  {% set active_color = text_color %}
+                {% endif %}
+                {% if rainbow %}
+                  {% set payload = dict(payload, palette='Rainbow', textColor='palette') %}
+                {% else %}
+                  {% set payload = dict(payload, textColor=[active_color[0] | int, active_color[1] | int, active_color[2] | int]) %}
+                {% endif %}
+                {% if duration_sec | int(0) > 0 %}
+                  {% set payload = dict(payload, durationMs=(duration_sec | int(0)) * 1000) %}
+                {% endif %}
+                {% if show_progress %}
+                  {% set span = (progress_max | float(100)) - (progress_min | float(0)) %}
+                  {% set raw_pct = ((value - (progress_min | float(0))) / span * 100) | round(0) | int if span != 0 else 0 %}
+                  {% set pct = 0 if raw_pct < 0 else (100 if raw_pct > 100 else raw_pct) %}
+                  {% set payload = dict(payload, progress=pct, progressColor=[active_color[0] | int, active_color[1] | int, active_color[2] | int]) %}
+                {% endif %}
+                {{ payload | tojson }}
+    default:
+      - action: mqtt.publish
+        data:
+          topic: "{{ mqtt_topic }}/cmd/apps/pushed/{{ app_name }}"
+          payload: ""
   - if:
       - "{{ apply_device_settings }}"
     then:
